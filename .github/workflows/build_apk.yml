@@ -28,119 +28,82 @@ jobs:
           flutter-version: '3.x'
           channel: 'stable'
           cache: true
-          
-      - name: Verify Flutter version
-        run: flutter --version
       
-      - name: Find Flutter project root
-        id: find-project
+      - name: Navigate to project and cleanup
+        working-directory: ./tech_blog
         run: |
-          # پیدا کردن مسیر پروژه فلاتر (جایی که pubspec.yaml وجود داره)
-          if [ -f "pubspec.yaml" ]; then
-            echo "project_path=." >> $GITHUB_OUTPUT
-            echo "✅ Found pubspec.yaml in root directory"
-          elif [ -f "my_flutter_app/pubspec.yaml" ]; then
-            echo "project_path=my_flutter_app" >> $GITHUB_OUTPUT
-            echo "✅ Found pubspec.yaml in my_flutter_app directory"
-          else
-            # جستجوی عمیق‌تر برای pubspec.yaml
-            PROJECT_PATH=$(find . -name "pubspec.yaml" -type f -exec dirname {} \; | head -n 1)
-            if [ -n "$PROJECT_PATH" ]; then
-              echo "project_path=$PROJECT_PATH" >> $GITHUB_OUTPUT
-              echo "✅ Found pubspec.yaml in $PROJECT_PATH"
-            else
-              echo "❌ Could not find pubspec.yaml in any directory"
-              exit 1
-            fi
+          echo "📁 Current directory: $(pwd)"
+          echo "📂 Listing files:"
+          ls -la
+          
+          # پشتیبان از pubspec.yaml و پوشه lib
+          cp pubspec.yaml pubspec.yaml.backup
+          if [ -d "lib" ]; then
+            cp -r lib lib_backup
+          fi
+          if [ -d "assets" ]; then
+            cp -r assets assets_backup
+          fi
+      
+      - name: Complete regeneration of Android project
+        working-directory: ./tech_blog
+        run: |
+          echo "🔄 Completely regenerating Android project..."
+          
+          # حذف کامل پوشه android
+          rm -rf android/
+          rm -rf .dart_tool/
+          rm -rf build/
+          
+          # بازسازی پروژه از صفر
+          flutter create --platforms=android --project-name=tech_blog .
+          
+          # بازگردانی فایل‌های مهم
+          if [ -f "pubspec.yaml.backup" ]; then
+            # ادغام dependencies از فایل backup
+            grep -A 100 "dependencies:" pubspec.yaml.backup > temp_deps.txt
+            echo "✅ Dependencies backed up"
           fi
           
-          echo "Current directory structure:"
-          ls -la
+          # بازگردانی پوشه‌ها
+          if [ -d "lib_backup" ]; then
+            rm -rf lib
+            mv lib_backup lib
+          fi
+          
+          if [ -d "assets_backup" ]; then
+            mv assets_backup assets
+          fi
+          
+          echo "✅ Android project regenerated"
       
-      - name: Install dependencies
-        working-directory: ${{ steps.find-project.outputs.project_path }}
+      - name: Create local.properties
+        working-directory: ./tech_blog/android
+        run: |
+          echo "Creating local.properties..."
+          echo "sdk.dir=/usr/lib/android-sdk" > local.properties
+          echo "flutter.sdk=$FLUTTER_ROOT" >> local.properties
+          
+          # پیدا کردن مسیر Flutter SDK
+          FLUTTER_PATH=$(which flutter)
+          FLUTTER_DIR=$(dirname $(dirname $FLUTTER_PATH))
+          echo "flutter.sdk=$FLUTTER_DIR" >> local.properties
+          
+          echo "✅ local.properties created:"
+          cat local.properties
+      
+      - name: Get packages
+        working-directory: ./tech_blog
         run: flutter pub get
         
-      - name: Run code generation (if needed)
-        working-directory: ${{ steps.find-project.outputs.project_path }}
-        run: |
-          if grep -q "build_runner" pubspec.yaml; then
-            flutter pub run build_runner build --delete-conflicting-outputs
-          else
-            echo "build_runner not found in dependencies, skipping code generation"
-          fi
-        continue-on-error: true
-        
-      - name: Run tests
-        working-directory: ${{ steps.find-project.outputs.project_path }}
-        run: flutter test
-        continue-on-error: true
-        
-      - name: Clean previous builds
-        working-directory: ${{ steps.find-project.outputs.project_path }}
-        run: flutter clean
-        
       - name: Build debug APK
-        working-directory: ${{ steps.find-project.outputs.project_path }}
+        working-directory: ./tech_blog
         run: flutter build apk --debug
         
-      - name: Build split APKs (per ABI)
-        working-directory: ${{ steps.find-project.outputs.project_path }}
-        run: flutter build apk --debug --split-per-abi
-        continue-on-error: true
-        
-      - name: List APK files
-        working-directory: ${{ steps.find-project.outputs.project_path }}
-        run: |
-          echo "APK files found:"
-          find . -name "*.apk" -type f | while read -r file; do
-            size=$(du -h "$file" | cut -f1)
-            echo "  - $file ($size)"
-          done
-          
-      - name: Upload debug APK (universal)
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-universal
-          path: ${{ steps.find-project.outputs.project_path }}/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: warn
+          name: tech-blog-debug-apk
+          path: tech_blog/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
           retention-days: 7
-          
-      - name: Upload split APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-split
-          path: |
-            ${{ steps.find-project.outputs.project_path }}/build/app/outputs/flutter-apk/app-*-debug.apk
-            !${{ steps.find-project.outputs.project_path }}/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: ignore
-          retention-days: 7
-          
-      - name: Create summary
-        working-directory: ${{ steps.find-project.outputs.project_path }}
-        run: |
-          echo "## ✅ Build Completed Successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📱 APK Files" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -f "build/app/outputs/flutter-apk/app-debug.apk" ]; then
-            size=$(du -h "build/app/outputs/flutter-apk/app-debug.apk" | cut -f1)
-            echo "| Universal APK | $size |" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          for apk in build/app/outputs/flutter-apk/app-*-debug.apk; do
-            if [ -f "$apk" ] && [[ ! "$apk" == *"app-debug.apk" ]]; then
-              filename=$(basename "$apk")
-              size=$(du -h "$apk" | cut -f1)
-              echo "| $filename | $size |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "🔽 APK files are available as artifacts (download from the Summary page)" >> $GITHUB_STEP_SUMMARY
-
-          
