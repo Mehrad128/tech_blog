@@ -1,17 +1,15 @@
 import java.util.Properties
 import java.io.FileInputStream
 
-plugins {
-    id("com.android.application")
-    id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
-    id("dev.flutter.flutter-gradle-plugin")
-}
+// این خط رو اضافه کن برای پیدا کردن Flutter SDK
+val flutterRoot = localProperties.getProperty("flutter.sdk") ?: throw GradleException("Flutter SDK not found")
+
+// به جای plugins block، از apply استفاده کن
+apply(from = "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle")
 
 android {
     namespace = "com.example.tech_blog"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 34  // یا flutter.compileSdkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -24,10 +22,10 @@ android {
 
     defaultConfig {
         applicationId = "com.example.tech_blog"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        minSdk = 21  // یا flutter.minSdkVersion
+        targetSdk = 34  // یا flutter.targetSdkVersion
+        versionCode = 1
+        versionName = "1.0"
     }
 
     signingConfigs {
@@ -47,8 +45,6 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = if (rootProject.file("key.properties").exists()) {
                 signingConfigs.getByName("release")
             } else {
