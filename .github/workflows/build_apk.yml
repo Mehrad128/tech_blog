@@ -142,3 +142,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "🔽 APK files are available as artifacts (download from the Summary page)" >> $GITHUB_STEP_SUMMARY
+          
