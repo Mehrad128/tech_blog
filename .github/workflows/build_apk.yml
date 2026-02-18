@@ -1,50 +1,109 @@
-name: Build Flutter APK
+name: Build Flutter APK (Debug)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, develop ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:
+  workflow_dispatch:  # قابلیت اجرای دستی
 
 jobs:
-  build:
+  build-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-
+          
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.x'  # می‌تونی نسخه خاصی مشخص کنی مثلاً '3.16.0'
           channel: 'stable'
-          flutter-version: '3.x'
           cache: true
-
-      - name: Clean project
-        run: |
-          flutter clean
-          rm -rf android/.gradle
-          rm -rf ~/.gradle/caches/
-          rm -rf build/
-
-      - name: Get dependencies
+          
+      - name: Verify Flutter version
+        run: flutter --version
+        
+      - name: Install dependencies
         run: flutter pub get
-
-      - name: Build APK
+        
+      - name: Run code generation (if needed)
+        run: |
+          if grep -q "build_runner" pubspec.yaml; then
+            flutter pub run build_runner build --delete-conflicting-outputs
+          fi
+        continue-on-error: true  # اگر build_runner نباشه ادامه بده
+        
+      - name: Run tests
+        run: flutter test
+        continue-on-error: true  # خطاهای تست رو نادیده بگیر (اختیاری)
+        
+      - name: Clean previous builds
+        run: flutter clean
+        
+      - name: Build debug APK
         run: flutter build apk --debug
-
-      - name: Upload APK artifact
+        
+      - name: Build split APKs (per ABI)
+        run: flutter build apk --debug --split-per-abi
+        continue-on-error: true  # اگر خطا داد ادامه بده
+        
+      - name: List APK files
+        run: |
+          echo "APK files found:"
+          find . -name "*.apk" -type f | while read -r file; do
+            size=$(du -h "$file" | cut -f1)
+            echo "  - $file ($size)"
+          done
+          
+      - name: Upload debug APK (universal)
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: app-debug-universal
           path: build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 30
+          if-no-files-found: warn
+          retention-days: 7
+          
+      - name: Upload split APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-split
+          path: |
+            build/app/outputs/flutter-apk/app-*-debug.apk
+            !build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: ignore
+          retention-days: 7
+          
+      - name: Create summary
+        run: |
+          echo "## ✅ Build Completed Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 APK Files" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "build/app/outputs/flutter-apk/app-debug.apk" ]; then
+            size=$(du -h "build/app/outputs/flutter-apk/app-debug.apk" | cut -f1)
+            echo "| Universal APK | $size |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          for apk in build/app/outputs/flutter-apk/app-*-debug.apk; do
+            if [ -f "$apk" ] && [[ ! "$apk" == *"app-debug.apk" ]]; then
+              filename=$(basename "$apk")
+              size=$(du -h "$apk" | cut -f1)
+              echo "| $filename | $size |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "🔽 APK files are available as artifacts (download from the Summary page)" >> $GITHUB_STEP_SUMMARY
