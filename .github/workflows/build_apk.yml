@@ -5,7 +5,7 @@ on:
     branches: [ main, master, develop ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # قابلیت اجرای دستی
+  workflow_dispatch:
 
 jobs:
   build-apk:
@@ -25,38 +25,72 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.x'  # می‌تونی نسخه خاصی مشخص کنی مثلاً '3.16.0'
+          flutter-version: '3.x'
           channel: 'stable'
           cache: true
           
       - name: Verify Flutter version
         run: flutter --version
-        
+      
+      - name: Find Flutter project root
+        id: find-project
+        run: |
+          # پیدا کردن مسیر پروژه فلاتر (جایی که pubspec.yaml وجود داره)
+          if [ -f "pubspec.yaml" ]; then
+            echo "project_path=." >> $GITHUB_OUTPUT
+            echo "✅ Found pubspec.yaml in root directory"
+          elif [ -f "my_flutter_app/pubspec.yaml" ]; then
+            echo "project_path=my_flutter_app" >> $GITHUB_OUTPUT
+            echo "✅ Found pubspec.yaml in my_flutter_app directory"
+          else
+            # جستجوی عمیق‌تر برای pubspec.yaml
+            PROJECT_PATH=$(find . -name "pubspec.yaml" -type f -exec dirname {} \; | head -n 1)
+            if [ -n "$PROJECT_PATH" ]; then
+              echo "project_path=$PROJECT_PATH" >> $GITHUB_OUTPUT
+              echo "✅ Found pubspec.yaml in $PROJECT_PATH"
+            else
+              echo "❌ Could not find pubspec.yaml in any directory"
+              exit 1
+            fi
+          fi
+          
+          echo "Current directory structure:"
+          ls -la
+      
       - name: Install dependencies
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: flutter pub get
         
       - name: Run code generation (if needed)
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: |
           if grep -q "build_runner" pubspec.yaml; then
             flutter pub run build_runner build --delete-conflicting-outputs
+          else
+            echo "build_runner not found in dependencies, skipping code generation"
           fi
-        continue-on-error: true  # اگر build_runner نباشه ادامه بده
+        continue-on-error: true
         
       - name: Run tests
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: flutter test
-        continue-on-error: true  # خطاهای تست رو نادیده بگیر (اختیاری)
+        continue-on-error: true
         
       - name: Clean previous builds
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: flutter clean
         
       - name: Build debug APK
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: flutter build apk --debug
         
       - name: Build split APKs (per ABI)
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: flutter build apk --debug --split-per-abi
-        continue-on-error: true  # اگر خطا داد ادامه بده
+        continue-on-error: true
         
       - name: List APK files
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: |
           echo "APK files found:"
           find . -name "*.apk" -type f | while read -r file; do
@@ -68,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-universal
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: ${{ steps.find-project.outputs.project_path }}/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: warn
           retention-days: 7
           
@@ -77,12 +111,13 @@ jobs:
         with:
           name: app-debug-split
           path: |
-            build/app/outputs/flutter-apk/app-*-debug.apk
-            !build/app/outputs/flutter-apk/app-debug.apk
+            ${{ steps.find-project.outputs.project_path }}/build/app/outputs/flutter-apk/app-*-debug.apk
+            !${{ steps.find-project.outputs.project_path }}/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: ignore
           retention-days: 7
           
       - name: Create summary
+        working-directory: ${{ steps.find-project.outputs.project_path }}
         run: |
           echo "## ✅ Build Completed Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
